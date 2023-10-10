@@ -1,0 +1,170 @@
+<!doctype html>
+<html lang="ja" data-theme="lemonade">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+  <link href="https://cdn.jsdelivr.net/npm/daisyui@3.9.2/dist/full.css" rel="stylesheet" type="text/css" />
+  <script src="https://cdn.tailwindcss.com"></script>
+  <title>おえかきリレー</title>
+  <style>
+    * {
+      font-variant-emoji: emoji;
+    }
+  </style>
+</head>
+<body>
+    <main class="flex justify-center w-full">
+    <div class="alert alert-info mt-3 mb-3 max-w-6xl mx-[max(12vw,2px)]" style="display: none; position: absolute" id="alert">
+      <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" class="stroke-current shrink-0 w-6 h-6"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
+      <span></span>
+    </div>
+    <div class="text-center max-w-6xl mx-[max(12vw,2px)] mt-10">
+        <div class="text-2xl">おえかきリレー</div>
+        <div class="bg-slate-600 text-slate-300 p-5">
+          <p>1. 表示されているお題を当ててください。</p>
+        </div>
+
+        <div id="sorry" class="m-5" style="display: none">
+          <p class="text-xl">ごめんなさい。まだお題が無いみたいです。</p>
+          <p>とりあえずお題だけ考えていただけると助かります。</p>
+        </div>
+        <img id="odai" width="500" height="500" style="display: none" class="mt-2 border-8 border-solid border-gray-400" />
+        <label class="label" id="answer_desc" style="display: none">
+          <span class="label-text">これは何だと思いますか？ (回答はひらがなで)</span>
+        </label>
+        <input value="" type="text" id="answer" onChange="validate_hiragana()" pattern="[\u3041-\u3096]*" style="display: none" placeholder="ここに入力してね" class="input input-bordered w-full" />
+        
+        <div class="bg-slate-600 text-slate-300 p-5 mt-3">
+          <p>2. 次の人へのお題を考えてください。</p>
+        </div>
+        
+        <div class="mt-5 text-2xl">
+          <input type="radio" id="draw" class="radio" name="mode">
+          <label for="draw">✒️ ペン</label>
+          <input type="radio" id="erase" class="radio" name="mode">
+          <label for="draw">🗑️ 消しゴム</label>
+
+          <canvas id="canvas" height="500" width="500" class="border-8 border-solid border-gray-400"></canvas>
+          <div class="form-control w-full max-w-xs">
+          <label class="label">
+            <span class="label-text">これは何を描いたつもりですか？ (ひらがな)</span>
+          </label>
+          <input value="" type="text" id="next_answer" onChange="validate_hiragana()" pattern="[\u3041-\u3096]*" placeholder="ここに入力してね" class="input input-bordered w-full" />
+        </div>
+        <button disabled id="submit_button" class="btn btn-primary text-3xl mt-2 mb-5" onClick="validate_hiragana(); post_data()">✅ 完了</button>
+    </div>
+    </main>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/fabric.js/4.5.0/fabric.min.js"></script>
+    <script>
+      const canvas = new fabric.Canvas("canvas");
+      let is_first = false
+      canvas.backgroundColor = "white";
+      const sleep = ms => new Promise(res => setTimeout(res, ms))
+
+      window.onload = function() {
+        document.getElementById("draw").click();
+        fetch("/api/oekaki")
+          .then(res => res.json())
+          .then(data => {
+            const img_src = data.image
+              if (img_src == "") {
+                is_first = true
+                console.log(is_first)
+                document.getElementById("sorry").style.display = "block";
+              } else {
+                let odai = document.getElementById("odai")
+                odai.src = img_src;
+                odai.style.display = "block";
+                document.getElementById("answer").style.display = "block";
+                document.getElementById("answer_desc").style.display = "block";
+              }
+          })
+        }
+      
+      
+      
+      function validate_hiragana() {
+        const hiragana_regex = `[\u3041-\u3096]*`
+        let answer = document.getElementById("answer").value
+        let next_answer = document.getElementById("next_answer").value
+
+        let submit_button = document.getElementById("submit_button")
+        
+        if ((answer.match(hiragana_regex) || is_first) && next_answer.match(hiragana_regex)) {
+          submit_button.disabled = false;
+          console.log("false")
+        } else {
+          submit_button.disabled = true;
+          console.log("true")
+        }
+      }
+
+      document.getElementById("answer").addEventListener('change', function(e) {validate_hiragana()});
+      document.getElementById("next_answer").addEventListener('change', function(e) {validate_hiragana()});
+
+      async function do_alert(message) {
+        document.getElementById("alert").innerHTML = message;
+        document.getElementById("alert").style.display = "block";
+        await sleep(3000)
+        document.getElementById("alert").style.display = "none";
+      }
+
+      async function post_data() {
+        document.getElementById("submit_button").disabled = true
+
+        let data = {
+          image: document.getElementById("canvas").toDataURL(),
+          answer: document.getElementById("answer").value,
+          next_answer: document.getElementById("next_answer").value,
+        }
+
+        const res_raw = await fetch('/api/oekaki', {
+          method: 'post',
+          headers: {
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify(data)
+        })
+        const res = await res_raw.json()
+        if (res.success) {
+          if (res.correct && !is_first) {
+              await do_alert("あなたの回答「" + document.getElementById("answer").value + "」は正解でした！<span class=\"inline-block\">あなたのお題を送信しました。</span>")
+          } else if (!res.correct && !is_first) {
+            await do_alert("あなたの回答「" + document.getElementById("answer").value + "」は不正解でした...<span class=\"inline-block\">あなたのお題を送信しました。</span>")
+          } else {
+            await do_alert("あなたのお題を送信しました。")
+          }
+          location.reload();
+        } else {
+          let additional = ""
+          if (res.error == "Too small input image") {
+            additional = "もう少し、何か描いてあげてください。"
+          }
+          if (res.error.includes("non hiragana character")) {
+            additional = "回答は、すべてひらがなで行なってください。"
+          }
+          if (res.error.includes("answer is not given")) {
+            additional = "なにか回答を入力してください。"
+          }
+          document.getElementById("submit_button").disabled = false;
+          await do_alert("送信に失敗しました。" + additional)
+        }
+      }
+
+      document.getElementById("draw").addEventListener("click", function () {
+          canvas.freeDrawingBrush = new fabric.PencilBrush(canvas);
+          canvas.freeDrawingBrush.width=5;
+          canvas.freeDrawingBrush.color="black";
+          canvas.isDrawingMode = true;
+      });
+      
+      document.getElementById("erase").addEventListener("click", function () {
+        canvas.freeDrawingBrush = new fabric.PencilBrush(canvas);
+        canvas.freeDrawingBrush.width=20;
+        canvas.freeDrawingBrush.color="white";
+        canvas.isDrawingMode = true;
+      });
+    </script>
+</body>
+</html>
